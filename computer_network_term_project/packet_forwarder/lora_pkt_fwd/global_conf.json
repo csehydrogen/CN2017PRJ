@@ -200,7 +200,7 @@
 		}
 	},
 	"gateway_conf": {
-		"gateway_ID": "B827EB000012798D",
+		"gateway_ID": "b827ebFFFE12798d",
 		"server_address": "localhost",
 		"serv_port_up": 1680,
 		"serv_port_down": 1680,
