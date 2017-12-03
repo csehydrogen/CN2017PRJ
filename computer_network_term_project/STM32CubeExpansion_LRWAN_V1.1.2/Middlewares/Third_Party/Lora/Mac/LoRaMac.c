@@ -698,6 +698,97 @@ static void PrepareRxDoneAbort( void )
     TimerStart( &MacStateCheckTimer );
 }
 
+
+
+//////////////////////////////////// Project Code /////////////////////////////////////
+//////////////////////////////////// Project Code /////////////////////////////////////
+//////////////////////////////////// Project Code /////////////////////////////////////
+//////////////////////////////////// Project Code /////////////////////////////////////
+
+#define	BEACON_INTERVAL		1000		// set beacon interval as 1sec(1000ms)
+#define PING_INTERVAL		125			// set ping interval as 0.125sec(125ms)
+#define WAKEUP_THRESHOLD 	BEACON_INTERVAL / PING_INTERVAL - 2
+
+static TimerEvent_t RxDataTimer;
+static uint32_t wakeup_cnt = 0;
+
+static RxConfigParams_t RxDataWindowConfig;
+
+// Check whether this device's MAC address matches with {@param device_addr}
+bool check_device_addr(uint8_t *device_addr) 
+{
+	uint32_t address = 0;
+	address = device_addr[0];
+	address |= ( (uint32_t)device_addr[1] << 8 );
+	address |= ( (uint32_t)device_addr[2] << 16 );
+	address |= ( (uint32_t)device_addr[3] << 24 );
+
+	if( address == LoRaMacDevAddr ) {
+		return true;
+	}
+	return false;
+}
+
+// There are {@param frame_num} number of frames to receive(recursively called function).
+// When wakeup_cnt > threshold, do not wake up until next beacon.
+void get_pending_frame() 
+{
+	if (wakeup_cnt > WAKEUP_THRESHOLD || pending_frame == 0) {
+		return;
+	}
+	TimerSetValue(&RxDataTimer, PING_INTERVAL);
+	TimerStart(&RxDataTimer);
+}
+
+
+// When device receives beacon, analyze the beacon and set timer to receive data according to the beacon frame's payload info.
+static void OnBeaconRxDone ( void )
+{
+	// Get payload and payload size
+	uint8_t *beacon_payload = McpsIndication.Buffer;
+	uint8_t beacon_payload_size = McpsIndication.BufferSize;
+	
+	// Payload size if 5*N byte (N: number of devices)
+	// format: device_addr(4byte) + number of pending frame(1byte)
+	uint8_t device_num = beacon_payload_size / 5;
+	pending_frame = 0;
+	for (uint8_t i = 0; i < device_num; i++) {
+		uint8_t *device_addr = beacon_payload + (5 * i);
+		if (check_device_addr(device_addr)) {
+			pending_frame = *(beacon_payload + (5 * i + 4));
+			wakeup_cnt = 0;
+			get_pending_frame();
+			break;
+		}
+	}
+}
+
+// When RxDataTimer is finished, call back function.
+// 1) stop timer, 2) Setting configurations, 3) RxWindowSetup(start listen with Radio.Rx()), 4) call get_pending_frame()
+static void OnRxDataTimerEvent( void )
+{
+    TimerStop( &RxDataTimer );
+	wakeup_cnt++;
+	
+    RxSlot = 0;
+	// TODO: Channel??
+    RxDataWindowConfig.Channel = Channel;
+    RxDataWindowConfig.RxContinuous = false;
+
+    RegionRxConfig( LoRaMacRegion, &RxDataWindowConfig, ( int8_t* )&McpsIndication.RxDatarate );
+    RxWindowSetup( RxDataWindowConfig.RxContinuous, LoRaMacParams.MaxRxWindow );
+	
+	get_pending_frame();
+}
+
+
+//////////////////////////////////// Project Code /////////////////////////////////////
+//////////////////////////////////// Project Code /////////////////////////////////////
+//////////////////////////////////// Project Code /////////////////////////////////////
+//////////////////////////////////// Project Code /////////////////////////////////////
+
+
+
 static void OnRadioRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr )
 {
     LoRaMacHeader_t macHdr;
@@ -1103,6 +1194,18 @@ static void OnRadioRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t
                 McpsIndication.BufferSize = size - pktHeaderLen;
 
                 LoRaMacFlags.Bits.McpsInd = 1;
+				
+				///////////////// Project Code /////////////////////
+				///////////////// Project Code /////////////////////
+				///////////////// Project Code /////////////////////
+				///////////////// Project Code /////////////////////
+				
+				OnBeaconRxDone();
+								
+				///////////////// Project Code /////////////////////
+				///////////////// Project Code /////////////////////
+				///////////////// Project Code /////////////////////
+				///////////////// Project Code /////////////////////
                 break;
             }
         default:
@@ -2420,7 +2523,19 @@ LoRaMacStatus_t LoRaMacInitialization( LoRaMacPrimitives_t *primitives, LoRaMacC
     TimerInit( &RxWindowTimer1, OnRxWindow1TimerEvent );
     TimerInit( &RxWindowTimer2, OnRxWindow2TimerEvent );
     TimerInit( &AckTimeoutTimer, OnAckTimeoutTimerEvent );
-
+	
+	
+	/////////////////////////// Project Code ////////////////////////////////
+	/////////////////////////// Project Code ////////////////////////////////
+	/////////////////////////// Project Code ////////////////////////////////
+	
+	TimerInit( &RxDataTimer, OnRxDataTimerEvent );
+	
+	/////////////////////////// Project Code ////////////////////////////////
+	/////////////////////////// Project Code ////////////////////////////////
+	/////////////////////////// Project Code ////////////////////////////////
+	
+	
     // Store the current initialization time
     LoRaMacInitializationTime = TimerGetCurrentTime( );
 

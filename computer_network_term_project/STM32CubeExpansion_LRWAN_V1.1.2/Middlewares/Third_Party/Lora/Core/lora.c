@@ -505,8 +505,21 @@ static void McpsIndication( McpsIndication_t *mcpsIndication )
             }
             break;
         default:
-            
-            AppData.Port = mcpsIndication->Port;
+						
+			///////////////// Project Code /////////////////////
+			///////////////// Project Code /////////////////////
+			///////////////// Project Code /////////////////////
+			///////////////// Project Code /////////////////////
+		
+			pending_frame--;
+		
+			///////////////// Project Code /////////////////////
+			///////////////// Project Code /////////////////////
+			///////////////// Project Code /////////////////////
+			///////////////// Project Code /////////////////////
+
+		
+			AppData.Port = mcpsIndication->Port;
             AppData.BuffSize = mcpsIndication->BufferSize;
             memcpy1( AppData.Buff, mcpsIndication->Buffer, AppData.BuffSize );
             
