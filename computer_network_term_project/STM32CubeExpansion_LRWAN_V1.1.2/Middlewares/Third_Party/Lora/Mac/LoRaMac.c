@@ -709,8 +709,10 @@ static void PrepareRxDoneAbort( void )
 #define PING_INTERVAL		125			// set ping interval as 0.125sec(125ms)
 #define WAKEUP_THRESHOLD 	BEACON_INTERVAL / PING_INTERVAL - 2
 
-static TimerEvent_t RxDataTimer;
+static TimerEvent_t PingTimer;	// ping timer
+static TimerEvent_t BeaconTimer;	// beacon timer
 static uint32_t wakeup_cnt = 0;
+static uint32_t waiting_beacon = 1;	// 1 for waiting beacon, 0 for not waiting beacon
 
 static RxConfigParams_t RxDataWindowConfig;
 
@@ -736,14 +738,19 @@ void get_pending_frame()
 	if (wakeup_cnt > WAKEUP_THRESHOLD || pending_frame == 0) {
 		return;
 	}
-	TimerSetValue(&RxDataTimer, PING_INTERVAL);
-	TimerStart(&RxDataTimer);
+	TimerSetValue(&PingTimer, PING_INTERVAL);
+	TimerStart(&PingTimer);
 }
 
 
 // When device receives beacon, analyze the beacon and set timer to receive data according to the beacon frame's payload info.
 static void OnBeaconRxDone ( void )
 {
+	// Reset beacon timer
+	waiting_beacon = 0;
+	TimerSetValue(&BeaconTimer, BEACON_INTERVAL);
+	TimerStart(&BeaconTimer);
+	
 	// Get payload and payload size
 	uint8_t *beacon_payload = McpsIndication.Buffer;
 	uint8_t beacon_payload_size = McpsIndication.BufferSize;
@@ -763,14 +770,13 @@ static void OnBeaconRxDone ( void )
 	}
 }
 
-// When RxDataTimer is finished, call back function.
-// 1) stop timer, 2) Setting configurations, 3) RxWindowSetup(start listen with Radio.Rx()), 4) call get_pending_frame()
-static void OnRxDataTimerEvent( void )
+// When PingTimer is finished, call back function.
+// 1) stop timer, 2) set configurations, 3) RxWindowSetup(start listen with Radio.Rx()), 4) call get_pending_frame()
+static void OnPingTimerEvent( void )
 {
-    TimerStop( &RxDataTimer );
+    TimerStop( &PingTimer );
 	wakeup_cnt++;
 	
-    RxSlot = 0;
 	// TODO: Channel??
     RxDataWindowConfig.Channel = Channel;
     RxDataWindowConfig.RxContinuous = false;
@@ -779,6 +785,14 @@ static void OnRxDataTimerEvent( void )
     RxWindowSetup( RxDataWindowConfig.RxContinuous, LoRaMacParams.MaxRxWindow );
 	
 	get_pending_frame();
+}
+
+// When BeaconTimer is finished, set waiting_beacon as 1 and turn on the radio in continuous mode.
+static void OnBeaconTimerEvent( void )
+{
+	waiting_beacon = 1;
+	TimerStop( &BeaconTimer );
+	Radio.Rx(0);			// Receive message in continuous mode
 }
 
 
@@ -833,7 +847,15 @@ static void OnRadioRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t
     McpsIndication.DownLinkCounter = 0;
     McpsIndication.McpsIndication = MCPS_UNCONFIRMED;
 
-    Radio.Sleep( );
+	// Project code :
+	// If device is waiting for beacon, radio should not be turned off.
+	// If this message is beacon message, radio will be turned off in OnBeaconRxDone() function.
+	// Else, radio should be turned off for power safe mode.
+	if (!waiting_beacon) {
+		Radio.Sleep( );
+	}
+	////////////////////////////////////////////////////////////////////////////////////////////
+	
     TimerStop( &RxWindowTimer2 );
 
     macHdr.Value = payload[pktHeaderLen++];
@@ -2529,7 +2551,8 @@ LoRaMacStatus_t LoRaMacInitialization( LoRaMacPrimitives_t *primitives, LoRaMacC
 	/////////////////////////// Project Code ////////////////////////////////
 	/////////////////////////// Project Code ////////////////////////////////
 	
-	TimerInit( &RxDataTimer, OnRxDataTimerEvent );
+	TimerInit( &PingTimer, OnPingTimerEvent );
+	TimerInit( &BeaconTimer, OnBeaconTimerEvent );
 	
 	/////////////////////////// Project Code ////////////////////////////////
 	/////////////////////////// Project Code ////////////////////////////////
@@ -2553,6 +2576,9 @@ LoRaMacStatus_t LoRaMacInitialization( LoRaMacPrimitives_t *primitives, LoRaMacC
     PublicNetwork = true;
     Radio.SetPublicNetwork( PublicNetwork );
     Radio.Sleep( );
+	
+	// Project code. After initialization, radio should be turned on for the first beacon
+	Radio.Rx(0);
 
     return LORAMAC_STATUS_OK;
 }

@@ -511,7 +511,9 @@ static void McpsIndication( McpsIndication_t *mcpsIndication )
 			///////////////// Project Code /////////////////////
 			///////////////// Project Code /////////////////////
 		
-			pending_frame--;
+			if (pending_frame > 0) {
+				pending_frame--;
+			}
 		
 			///////////////// Project Code /////////////////////
 			///////////////// Project Code /////////////////////
