@@ -13,7 +13,7 @@
 -include_lib("lorawan_server_api/include/lorawan_application.hrl").
 -include("lorawan.hrl").
 
--record(state, {pulladdr, recent}).
+-record(state, {pulladdr, recent, beacon_timer}).
 
 start_link() ->
     gen_server:start_link({global, ?MODULE}, ?MODULE, [], []).
@@ -79,7 +79,8 @@ value_or_default(Num, _Def) when is_number(Num) -> Num;
 value_or_default(_Num, Def) -> Def.
 
 init([]) ->
-    {ok, #state{pulladdr=dict:new(), recent=dict:new()}}.
+    BeaconTimer = erlang:send_after(1, self(), beacon),
+    {ok, #state{pulladdr=dict:new(), recent=dict:new(), beacon_timer = BeaconTimer}}.
 
 handle_call(_Request, _From, State) ->
     {stop, {error, unknownmsg}, State}.
@@ -143,7 +144,14 @@ handle_info({process, PHYPayload}, #state{recent=Recent}=State) ->
     % lager:debug("--> datr ~s, codr ~s, tmst ~B, size ~B", [RxQ#rxq.datr, RxQ#rxq.codr, RxQ#rxq.tmst, byte_size(PHYPayload)]),
     wpool:cast(handler_pool, {Req, MAC, RxQ, PHYPayload}, available_worker),
     Recent2 = dict:erase(PHYPayload, Recent),
-    {noreply, State#state{recent=Recent2}}.
+    {noreply, State#state{recent=Recent2}};
+
+handle_info(beacon, #state{beacon_timer = OldBeaconTimer}=State) ->
+    erlang:cancel_timer(OldBeaconTimer),
+    lager:debug("[beacon] system_time = ~p", [erlang:system_time(millisecond)]),
+    % send beacon
+    NewBeaconTimer = erlang:send_after(1000, self(), beacon),
+    {noreply, State#state{beacon_timer = NewBeaconTimer}}.
 
 terminate(Reason, _State) ->
     % record graceful shutdown in the log
