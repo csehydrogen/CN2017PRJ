@@ -9,7 +9,7 @@
 -module(lorawan_mac).
 
 -export([process_frame/3, process_status/2]).
--export([handle_downlink/3, handle_multicast/3]).
+-export([handle_downlink/3, handle_multicast/3, handle_beacon/1]).
 -export([binary_to_hex/1, hex_to_binary/1]).
 % for unit testing
 -export([reverse/1, cipher/5, b0/4]).
@@ -498,6 +498,11 @@ handle_downlink(Link, Time, TxData) ->
 handle_multicast(Group, Time, TxData) ->
     TxQ = lorawan_mac_region:rf_fixed(Group#multicast_group.region),
     send_multicast(TxQ#txq{time=Time}, Group#multicast_group.devaddr, TxData).
+
+handle_beacon(TxData) ->
+    TxQ = lorawan_mac_region:rf_fixed(<<"KR920-923">>),
+    PHYPayload = <<2#111:3, 0:3, 0:2, TxData/binary>>,
+    {TxQ#txq{time=immediately}, PHYPayload}.
 
 choose_tx(#link{txwin=1}=Link, RxQ) ->
     lorawan_mac_region:rx1_window(Link, RxQ);

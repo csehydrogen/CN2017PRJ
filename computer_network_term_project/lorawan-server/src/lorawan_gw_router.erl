@@ -146,10 +146,23 @@ handle_info({process, PHYPayload}, #state{recent=Recent}=State) ->
     Recent2 = dict:erase(PHYPayload, Recent),
     {noreply, State#state{recent=Recent2}};
 
-handle_info(beacon, #state{beacon_timer = OldBeaconTimer}=State) ->
+handle_info(beacon, #state{pulladdr = MACDict, beacon_timer = OldBeaconTimer}=State) ->
     erlang:cancel_timer(OldBeaconTimer),
     lager:debug("[beacon] system_time = ~p", [erlang:system_time(millisecond)]),
+
     % send beacon
+    TxData = <<1, 2>>, % TODO dummy data now
+    {TxQ, PHYPayload} = lorawan_mac:handle_beacon(TxData),
+    lager:debug("[beacon] TxQ = ~p", [TxQ]),
+    lager:debug("[beacon] PHYPayload = ~p", [PHYPayload]),
+    lists:foreach(
+        fun(MAC) ->
+            lager:debug("[beacon] MAC = ~p", [MAC]),
+            lorawan_gw_router:downlink(#request{}, MAC, <<0:32>>, TxQ, PHYPayload)
+        end,
+        dict:fetch_keys(MACDict)),
+
+    % next beacon timer
     NewBeaconTimer = erlang:send_after(1000, self(), beacon),
     {noreply, State#state{beacon_timer = NewBeaconTimer}}.
 
