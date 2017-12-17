@@ -98,7 +98,8 @@ typedef enum eDevicState
     DEVICE_STATE_JOINED,
     DEVICE_STATE_SEND,
     DEVICE_STATE_CYCLE,
-    DEVICE_STATE_SLEEP
+    DEVICE_STATE_SLEEP,
+	DEVICE_STATE_WAIT_BEACON
 } DeviceState_t;
 
 /*!
@@ -240,6 +241,8 @@ void OnSendEvent( void );
  * @param [IN] none
  * @retval return @FlagStatus
   */
+  ////////// Project code //////////
+DeviceState_t lora_setDeviceState( DeviceState_t state );
 DeviceState_t lora_getDeviceState( void );
 
 #ifdef __cplusplus

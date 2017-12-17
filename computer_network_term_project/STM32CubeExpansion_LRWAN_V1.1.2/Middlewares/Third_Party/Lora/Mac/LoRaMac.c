@@ -25,6 +25,7 @@ Maintainer: Miguel Luis ( Semtech ), Gregory Cristian ( Semtech ) and Daniel Jae
 #include "radio.h"
 #include "timeServer.h"
 #include "LoRaMac.h"
+#include "lora.h"
 #include "region/Region.h"
 #include "LoRaMacCrypto.h"
 
@@ -705,14 +706,14 @@ static void PrepareRxDoneAbort( void )
 //////////////////////////////////// Project Code /////////////////////////////////////
 //////////////////////////////////// Project Code /////////////////////////////////////
 
-#define	BEACON_INTERVAL		1000		// set beacon interval as 1sec(1000ms)
-#define PING_INTERVAL		125			// set ping interval as 0.125sec(125ms)
-#define WAKEUP_THRESHOLD 	BEACON_INTERVAL / PING_INTERVAL - 2
+#define	BEACON_INTERVAL		5900		// set beacon interval as 1sec(1000ms)
+#define PING_INTERVAL		1700			// set ping interval as 0.125sec(125ms)
+#define WAKEUP_THRESHOLD 	2 				// BEACON_INTERVAL / PING_INTERVAL - 2
 
 static TimerEvent_t PingTimer;	// ping timer
 static TimerEvent_t BeaconTimer;	// beacon timer
 static uint32_t wakeup_cnt = 0;
-static uint32_t waiting_beacon = 1;	// 1 for waiting beacon, 0 for not waiting beacon
+static uint32_t waiting_beacon = 0;	// 1 for waiting beacon, 0 for not waiting beacon
 
 static RxConfigParams_t RxDataWindowConfig;
 static RxConfigParams_t RxBeaconWindowConfig;
@@ -720,12 +721,12 @@ static RxConfigParams_t RxBeaconWindowConfig;
 // Check whether this device's MAC address matches with {@param device_addr}
 bool check_device_addr(uint8_t *device_addr) 
 {
-	uint32_t address = 0;
-	address = device_addr[0];
-	address |= ( (uint32_t)device_addr[1] << 8 );
-	address |= ( (uint32_t)device_addr[2] << 16 );
-	address |= ( (uint32_t)device_addr[3] << 24 );
-
+	uint32_t address;
+	address = device_addr[0] << 24;
+	address |= ( (uint32_t)device_addr[1] << 16 );
+	address |= ( (uint32_t)device_addr[2] << 8 );
+	address |= ( (uint32_t)device_addr[3] );
+	
 	if( address == LoRaMacDevAddr ) {
 		return true;
 	}
@@ -736,7 +737,9 @@ bool check_device_addr(uint8_t *device_addr)
 // When wakeup_cnt > threshold, do not wake up until next beacon.
 void get_pending_frame() 
 {
-	if (wakeup_cnt > WAKEUP_THRESHOLD || pending_frame == 0) {
+	PRINTF("PENDING FRAME: %d, WAKEUP_CNT: %d\n\r", pending_frame, wakeup_cnt);
+	if (wakeup_cnt >= WAKEUP_THRESHOLD || pending_frame == 0) {
+		pending_frame = 0;
 		return;
 	}
 	TimerSetValue(&PingTimer, PING_INTERVAL);
@@ -746,29 +749,36 @@ void get_pending_frame()
 
 // When device receives beacon, analyze the beacon and set timer to receive data according to the beacon frame's payload info.
 static void OnBeaconRxDone ( void )
-{
+{	
+	PRINTF("BEACON RECEIVED\n\r");
+
 	// Reset beacon timer
 	waiting_beacon = 0;
+	Radio.Sleep();
 	TimerSetValue(&BeaconTimer, BEACON_INTERVAL);
 	TimerStart(&BeaconTimer);
+	lora_setDeviceState( DEVICE_STATE_SLEEP );
 	
 	
 	// Get payload and payload size
 	uint8_t *beacon_payload = McpsIndication.Buffer;
 	uint8_t beacon_payload_size = McpsIndication.BufferSize;
+	PRINTF("BEACON PAYLOAD PER BYTE: ");
 	for (uint8_t i = 0; i < beacon_payload_size; i++) {
-		PRINTF("%d\n\r", beacon_payload[i]);
+		PRINTF("%d ", beacon_payload[i]);
 	}
-
+	PRINTF("\n\r");
+	PRINTF("BEACON PAYLOAD SIZE: %d\n\r\n\r", beacon_payload_size);
+	
 	// Payload size if 5*N byte (N: number of devices)
 	// format: device_addr(4byte) + number of pending frame(1byte)
-	uint8_t device_num = beacon_payload_size / 5;
+	int device_num = beacon_payload_size / 5;
 	pending_frame = 0;
-	for (uint8_t i = 0; i < device_num; i++) {
+	for (int i = 0; i < device_num; i++) {
 		uint8_t *device_addr = beacon_payload + (5 * i);
 		if (check_device_addr(device_addr)) {
 			pending_frame = *(beacon_payload + (5 * i + 4));
-			wakeup_cnt = 0;
+			wakeup_cnt = 1;
 			get_pending_frame();
 			break;
 		}
@@ -779,33 +789,40 @@ static void OnBeaconRxDone ( void )
 // 1) stop timer, 2) set configurations, 3) RxWindowSetup(start listen with Radio.Rx()), 4) call get_pending_frame()
 static void OnPingTimerEvent( void )
 {
+	PRINTF("PING TIMER ON\n\r");
     TimerStop( &PingTimer );
+	Radio.Sleep();
 	wakeup_cnt++;
 	
-    RxDataWindowConfig.Channel = Channel;
-    RxDataWindowConfig.RxContinuous = false;
+	RxDataWindowConfig = RxWindow2Config;
+	RxDataWindowConfig.RxContinuous = true;
+	RxDataWindowConfig.Frequency = 921900000;
+	RxDataWindowConfig.Window = 2;
+	uint8_t check = RegionRxConfig( LoRaMacRegion, &RxDataWindowConfig, ( int8_t* )&McpsIndication.RxDatarate );
+    PRINTF("[RxData] RegionRxConfig check: %d\n\r", check);
 
-    RegionRxConfig( LoRaMacRegion, &RxDataWindowConfig, ( int8_t* )&McpsIndication.RxDatarate );
-   
-	
 	RxWindowSetup( RxDataWindowConfig.RxContinuous, LoRaMacParams.MaxRxWindow );
 	
 	get_pending_frame();
 }
 
 // When BeaconTimer is finished, set waiting_beacon as 1 and turn on the radio in continuous mode.
-static void OnBeaconTimerEvent( void )
+void OnBeaconTimerEvent( void )
 {
+	PRINTF("BEACON TIMER ON\n\r");
+	Radio.Sleep();
+	RxBeaconWindowConfig = RxWindow2Config;
+	RxBeaconWindowConfig.RxContinuous = true;
+	RxBeaconWindowConfig.Frequency = 921900000;
+	RxDataWindowConfig.Window = 2;
+	uint8_t check = RegionRxConfig( LoRaMacRegion, &RxBeaconWindowConfig, ( int8_t* )&McpsIndication.RxDatarate );
 	
-	RxBeaconWindowConfig.Channel = RxWindow2Config.Channel;
-    RxBeaconWindowConfig.Frequency = LoRaMacParams.Rx2Channel.Frequency;
-    RxBeaconWindowConfig.RepeaterSupport = RepeaterSupport;
-    RxBeaconWindowConfig.RxContinuous = true;
-	RegionRxConfig( LoRaMacRegion, &RxBeaconWindowConfig, ( int8_t* )&McpsIndication.RxDatarate );
+	PRINTF("[RxBeacon] RegionRxConfig check: %d\n\r", check);
    
 	waiting_beacon = 1;
 	TimerStop( &BeaconTimer );
 	Radio.Rx(0);			// Receive message in continuous mode
+	lora_setDeviceState( DEVICE_STATE_WAIT_BEACON );
 }
 
 
@@ -864,12 +881,12 @@ static void OnRadioRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t
 	// If device is waiting for beacon, radio should not be turned off.
 	// If this message is beacon message, radio will be turned off in OnBeaconRxDone() function.
 	// Else, radio should be turned off for power safe mode.
-	PRINTF("payload : \n\r");
+	PRINTF("\n\rRAW PAYLOAD : ");
 	for (int i = 0; i < size; ++i) {
 		PRINTF("%02x ", payload[i]);
 	}
 	PRINTF("\n\r");
-	PRINTF("WAITING BEACON: %d\n\r", waiting_beacon);
+	PRINTF("WAITING BEACON: %d (if 0: JR / data packet)\n\r\n\r", waiting_beacon);
 	if (!waiting_beacon) {
 		Radio.Sleep( );
 	}
@@ -938,12 +955,20 @@ static void OnRadioRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t
 				
 				PRINTF("WAIT FIRST BEACON\n\r");
 				// Project code. After initialization, radio should be turned on for the first beacon
+				/*
 				RxBeaconWindowConfig.Channel = RxWindow2Config.Channel;
+				//RxBeaconWindowConfig.Channel = Channel;
 				RxBeaconWindowConfig.Frequency = LoRaMacParams.Rx2Channel.Frequency;
 				RxBeaconWindowConfig.RepeaterSupport = RepeaterSupport;
 				RxBeaconWindowConfig.RxContinuous = true;
 				RegionRxConfig( LoRaMacRegion, &RxBeaconWindowConfig, ( int8_t* )&McpsIndication.RxDatarate );
-				
+				*/
+				waiting_beacon = 1;
+				RxBeaconWindowConfig = RxWindow2Config;
+				RxBeaconWindowConfig.RxContinuous = true;
+				RxBeaconWindowConfig.Frequency = 921900000;
+				RxDataWindowConfig.Window = 2;
+				uint8_t check = RegionRxConfig( LoRaMacRegion, &RxBeaconWindowConfig, ( int8_t* )&McpsIndication.RxDatarate );
 				Radio.Rx(0);
 				
             }
@@ -1251,7 +1276,6 @@ static void OnRadioRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t
 				///////////////// Project Code /////////////////////
 				///////////////// Project Code /////////////////////
 				///////////////// Project Code /////////////////////
-				PRINTF("BEACON FRAME RECEIVED\n\r");
 				OnBeaconRxDone();
 								
 				///////////////// Project Code /////////////////////

@@ -123,8 +123,6 @@ void LowPower_Handler( void )
   if ( LowPower_State == 0 )
   {    
     
-    DBG_PRINTF_CRITICAL("dz\n\r");
-    
     HW_EnterStopMode( );
     
     /* mcu dependent. to be implemented by user*/

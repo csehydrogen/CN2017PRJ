@@ -61,8 +61,9 @@ Maintainer: Miguel Luis, Gregory Cristian and Wael Guibene
 /* Includes ------------------------------------------------------------------*/
 #include "hw.h"
 #include "timeServer.h"
-#include "LoRaMac.h"
 #include "lora.h"
+#include "LoRaMac.h"
+#include "radio.h"
 
 /*!
  * Join requests trials duty cycle.
@@ -270,8 +271,10 @@ void OnSendEvent( void )
     {
         if( mibReq.Param.IsNetworkJoined == true )
         {
-            DeviceState = DEVICE_STATE_SEND;
-            NextTx = true;
+			if ( DeviceState != DEVICE_STATE_WAIT_BEACON) {
+				DeviceState = DEVICE_STATE_SEND;
+				NextTx = true;
+			}
         }
         else
         {
@@ -693,6 +696,7 @@ void lora_fsm( void)
     }
     case DEVICE_STATE_JOIN:
     {
+		PRINTF("JOIN_STATE\n\r");
 #if( OVER_THE_AIR_ACTIVATION != 0 )
       MlmeReq_t mlmeReq;
     
@@ -736,9 +740,34 @@ void lora_fsm( void)
     case DEVICE_STATE_JOINED:
     {
       PRINTF("JOINED\n\r");
-      DeviceState = DEVICE_STATE_SEND;
+	  
+	  //////////////// Project code /////////////////
+	  //////////////// Project code /////////////////
+	  //////////////// Project code /////////////////
+		
+		OnBeaconTimerEvent();
+		DeviceState = DEVICE_STATE_WAIT_BEACON;
+		
+	  //////////////// Project code /////////////////
+	  //////////////// Project code /////////////////
+	  //////////////// Project code /////////////////
+		
+      //DeviceState = DEVICE_STATE_SEND;		// Original Code
       break;
     }
+	case DEVICE_STATE_WAIT_BEACON:
+	{
+		////////////// Project code ////////////
+		////////////// Project code ////////////
+		////////////// Project code ////////////
+	
+		// Wake up through events
+		break;
+		
+		////////////// Project code ////////////
+		////////////// Project code ////////////
+		////////////// Project code ////////////
+	}
     case DEVICE_STATE_SEND:
     {
       if( NextTx == true )
@@ -774,6 +803,16 @@ void lora_fsm( void)
       break;
     }
   }
+}
+
+///////// Project code /////////////
+///////// Project code /////////////
+///////// Project code /////////////
+// Set DeviceState as {@param state} and return the new state
+DeviceState_t lora_setDeviceState( DeviceState_t state )
+{
+	DeviceState = state;
+	return state;
 }
 
 

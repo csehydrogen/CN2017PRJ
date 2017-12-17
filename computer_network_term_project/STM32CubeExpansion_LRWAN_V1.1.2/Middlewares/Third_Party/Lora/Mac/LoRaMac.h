@@ -1715,7 +1715,6 @@ static uint8_t pending_frame = 0;
 ///////////////// Project Code /////////////////////
 ///////////////// Project Code /////////////////////
 ///////////////// Project Code /////////////////////
-///////////////// Project Code /////////////////////
 
 
 /*!
@@ -1740,6 +1739,7 @@ static uint8_t pending_frame = 0;
  *          \ref LORAMAC_STATUS_PARAMETER_INVALID,
  *          \ref LORAMAC_STATUS_REGION_NOT_SUPPORTED.
  */
+void OnBeaconTimerEvent( void );
 LoRaMacStatus_t LoRaMacInitialization( LoRaMacPrimitives_t *primitives, LoRaMacCallback_t *callbacks, LoRaMacRegion_t region );
 
 /*!
