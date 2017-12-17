@@ -212,8 +212,7 @@ static void LoraTxData( lora_AppData_t *AppData, FunctionalState* IsTxConfirmed)
     
 static void LoraRxData( lora_AppData_t *AppData )
 {
-	uint8_t z = AppData->Buff[0];
-	PRINTF("z = %d\n\r", z);
+	PRINTF("RECEIVED = %.*s\n\r", AppData->BuffSize, AppData->Buff);
 }
 
 #ifdef USE_B_L072Z_LRWAN1
