@@ -244,6 +244,7 @@ void OnSendEvent( void );
   ////////// Project code //////////
 DeviceState_t lora_setDeviceState( DeviceState_t state );
 DeviceState_t lora_getDeviceState( void );
+/////////// Project code ///////////
 
 #ifdef __cplusplus
 }

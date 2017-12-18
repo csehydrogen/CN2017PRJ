@@ -513,9 +513,11 @@ static void McpsIndication( McpsIndication_t *mcpsIndication )
 			///////////////// Project Code /////////////////////
 			///////////////// Project Code /////////////////////
 			///////////////// Project Code /////////////////////
+		
 			if (pending_frame > 0) {
 				pending_frame--;
 			}
+			
 			///////////////// Project Code /////////////////////
 			///////////////// Project Code /////////////////////
 			///////////////// Project Code /////////////////////
@@ -752,7 +754,6 @@ void lora_fsm( void)
 	  //////////////// Project code /////////////////
 	  //////////////// Project code /////////////////
 		
-      //DeviceState = DEVICE_STATE_SEND;		// Original Code
       break;
     }
 	case DEVICE_STATE_WAIT_BEACON:
