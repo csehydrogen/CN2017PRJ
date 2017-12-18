@@ -6,6 +6,9 @@
 -module(lorawan_gw_router).
 -behaviour(gen_server).
 
+-define(PING_INTERVAL, 1000).
+-define(PING_REPEAT, 3).
+
 -export([start_link/0]).
 -export([register/3, status/2, uplinks/1, downlink/5, downlink_error/3]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -13,7 +16,7 @@
 -include_lib("lorawan_server_api/include/lorawan_application.hrl").
 -include("lorawan.hrl").
 
--record(state, {pulladdr, recent, beacon_timer}).
+-record(state, {pulladdr, recent, beacon_timer, ping_timer, ping_counter, ping_frames}).
 
 start_link() ->
     gen_server:start_link({global, ?MODULE}, ?MODULE, [], []).
@@ -146,12 +149,44 @@ handle_info({process, PHYPayload}, #state{recent=Recent}=State) ->
     Recent2 = dict:erase(PHYPayload, Recent),
     {noreply, State#state{recent=Recent2}};
 
-handle_info(beacon, #state{pulladdr = MACDict, beacon_timer = OldBeaconTimer}=State) ->
-    erlang:cancel_timer(OldBeaconTimer),
+handle_info(beacon, #state{pulladdr = MACDict, beacon_timer = BeaconTimer}=State) ->
+    PingTimer = erlang:send_after(?PING_INTERVAL, self(), ping),
+    erlang:cancel_timer(BeaconTimer),
     lager:debug("[beacon] system_time = ~p", [erlang:system_time(millisecond)]),
 
+    % TODO dummy frames
+    lorawan_handler:store_frame(<<16#FE000000:32>>, #txdata{port=2, data= <<16#EC>>}),
+    lorawan_handler:store_frame(<<16#FE000000:32>>, #txdata{port=2, data= <<16#EC>>}),
+    lorawan_handler:store_frame(<<16#FE000001:32>>, #txdata{port=2, data= <<16#EC>>}),
+
+    {atomic, TxFrames} = mnesia:transaction(
+        fun() ->
+            mnesia:write_lock_table(txframes),
+            TxFrames = mnesia:match_object(txframes, #txframe{_='_'}, read),
+            lists:foreach(
+                fun(TxFrame) ->
+                    mnesia:delete_object(txframes, TxFrame, write)
+                end, TxFrames),
+            TxFrames
+        end),
+    lager:debug("[beacon] TxFrames = ~p", [TxFrames]),
+
+    CPD = lists:foldl(
+        fun(#txframe{devaddr = DevAddr}, CPD) -> 
+            case dict:find(DevAddr, CPD) of
+                {ok, Count}  ->
+                    dict:store(DevAddr, Count + 1, CPD);
+                error ->
+                    dict:store(DevAddr, 1, CPD)
+            end
+        end, dict:new(), TxFrames),
+
+    TxData = dict:fold(
+        fun(Key, Value, AccIn) ->
+            <<Key/binary, Value, AccIn/binary>>
+        end, <<>>, CPD),
+
     % send beacon
-    TxData = <<1, 2>>, % TODO dummy data now
     {TxQ, PHYPayload} = lorawan_mac:handle_beacon(TxData),
     lager:debug("[beacon] TxQ = ~p", [TxQ]),
     lager:debug("[beacon] PHYPayload = ~p", [PHYPayload]),
@@ -162,9 +197,34 @@ handle_info(beacon, #state{pulladdr = MACDict, beacon_timer = OldBeaconTimer}=St
         end,
         dict:fetch_keys(MACDict)),
 
-    % next beacon timer
-    NewBeaconTimer = erlang:send_after(1000, self(), beacon),
-    {noreply, State#state{beacon_timer = NewBeaconTimer}}.
+    % let's ping
+    {noreply, State#state{ping_timer = PingTimer, ping_counter = ?PING_REPEAT, ping_frames = TxFrames}};
+
+handle_info(ping, #state{ping_timer = PingTimer, ping_counter = PingCounter, ping_frames = PingFrames}=State) ->
+    State0 = State#state{ping_counter = PingCounter - 1},
+    State1 = case State0#state.ping_counter of
+        0 ->
+            State0#state{beacon_timer = erlang:send_after(?PING_INTERVAL, self(), beacon)};
+        _ ->
+            State0#state{ping_timer = erlang:send_after(?PING_INTERVAL, self(), ping)}
+    end,
+    erlang:cancel_timer(PingTimer),
+    lager:debug("[ping] system_time = ~p", [erlang:system_time(millisecond)]),
+
+    case PingFrames of
+        [PingFrame | NewPingFrames] ->
+            DevAddr = PingFrame#txframe.devaddr,
+            case mnesia:dirty_read(links, DevAddr) of
+                [] ->
+                    lager:debug("[ping] Link not found (DevAddr : ~p)", [DevAddr]);
+                [Link] ->
+                    lorawan_handler:downlink(Link, immediately, PingFrame#txframe.txdata)
+            end;
+        _ ->
+            NewPingFrames = []
+    end,
+
+    {noreply, State1#state{ping_frames = NewPingFrames}}.
 
 terminate(Reason, _State) ->
     % record graceful shutdown in the log
